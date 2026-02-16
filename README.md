@@ -33,11 +33,17 @@ docker compose up --build -d
 ```
 Poi apri: `http://localhost:8080`
 
-## Deploy con Portainer
-1. Crea uno stack usando il file `docker-compose.yml`.
-2. Inserisci le variabili ambiente dello `.env` nella sezione Environment (oppure monta `.env`).
-3. Deploy dello stack.
-4. Apri `http://IP_DEL_SERVER:8080`.
+## Deploy con Portainer (Repository mode)
+1. In `Create stack`, scegli `Repository` e usa il repo GitHub.
+2. Seleziona `docker-compose.yml` come compose path.
+3. Nella sezione Environment imposta almeno:
+   - `PLEX_BASEURL=http://IP_DEL_TUO_PLEX:32400`
+   - `PLEX_TOKEN` (opzionale, puoi usare OAuth da UI)
+   - opzionali: `MAX_UPLOAD_MB`, `PORT`
+4. Deploy dello stack.
+5. Apri `http://IP_DEL_SERVER:8080`.
+
+Nota: il compose non usa piu `env_file: .env`, quindi in Repository mode non avrai errore `env file ... not found`.
 
 ## Formati Apple Music supportati
 - Export tabellare con colonne `Name` e `Artist` (TXT/CSV, UTF-16 o UTF-8).

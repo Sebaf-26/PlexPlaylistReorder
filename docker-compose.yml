@@ -4,6 +4,9 @@ services:
     container_name: plex-playlist-reorder
     ports:
       - "8080:8080"
-    env_file:
-      - .env
+    environment:
+      - PLEX_BASEURL=${PLEX_BASEURL:-http://127.0.0.1:32400}
+      - PLEX_TOKEN=${PLEX_TOKEN:-}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-8}
+      - PORT=${PORT:-8080}
     restart: unless-stopped
