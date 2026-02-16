@@ -224,13 +224,30 @@
         const previewRows = (data.newOrderPreview || []).slice(0, 10)
           .map(t => `<li>${t.artist ? `${t.artist} - ` : ''}${t.title}</li>`)
           .join('');
+        const missingRows = (data.missingInPlex || []).slice(0, 10)
+          .map(t => `<li>${t.artist ? `${t.artist} - ` : ''}${t.title}</li>`)
+          .join('');
+        const plexRows = (data.plexSample || []).slice(0, 10)
+          .map(t => `<li>${t.artist ? `${t.artist} - ` : ''}${t.title}</li>`)
+          .join('');
+        const b = data.matchBreakdown || {};
 
         el.previewInfo.innerHTML = `
           <div><strong>Playlist:</strong> ${data.playlistTitle}</div>
           <div><strong>Matches:</strong> ${data.matches} / ${data.uploadedCount ?? 0}</div>
           <div><strong>Missing in Plex:</strong> ${data.missingTotal ?? 0}</div>
+          <div><strong>Match breakdown:</strong>
+            exact title+artist ${b.exact_title_artist ?? 0},
+            exact title ${b.exact_title_only ?? 0},
+            loose title+artist ${b.loose_title_artist ?? 0},
+            loose title ${b.loose_title_only ?? 0}
+          </div>
           <div><strong>New order preview (first 10):</strong></div>
           <ol>${previewRows}</ol>
+          <div><strong>Missing sample (first 10):</strong></div>
+          <ol>${missingRows}</ol>
+          <div><strong>Plex metadata sample used for matching (first 10):</strong></div>
+          <ol>${plexRows}</ol>
         `;
       } catch (e) {
         renderError(el.previewInfo, String(e));

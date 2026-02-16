@@ -48,6 +48,16 @@ def normalize_key(title: str, artist: str) -> tuple[str, str]:
     return normalize_text(title), normalize_text(artist)
 
 
+def normalize_title_loose(value: str) -> str:
+    v = normalize_text(value)
+    # Remove common edition/version noise from titles.
+    v = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", v)
+    v = re.sub(r"\b(feat|featuring|ft)\.?\b.*$", " ", v)
+    v = re.sub(r"[^a-z0-9\s]", " ", v)
+    v = re.sub(r"\s+", " ", v).strip()
+    return v
+
+
 def decode_uploaded_bytes(raw: bytes) -> str:
     encodings = ["utf-16", "utf-8-sig", "utf-8", "latin-1"]
     for enc in encodings:
@@ -154,36 +164,64 @@ def build_reorder_plan(playlist: Any, imported_tracks: list[dict[str, str]]) -> 
 
     by_title_artist: dict[tuple[str, str], list[Any]] = {}
     by_title: dict[str, list[Any]] = {}
+    by_loose_title_artist: dict[tuple[str, str], list[Any]] = {}
+    by_loose_title: dict[str, list[Any]] = {}
+    plex_meta: list[dict[str, str]] = []
 
     for item in plex_items:
         title = getattr(item, "title", "") or ""
         artist = getattr(item, "grandparentTitle", "") or getattr(item, "originalTitle", "") or ""
+        loose_title = normalize_title_loose(title)
+        norm_artist = normalize_text(artist)
 
         key = normalize_key(title, artist)
         by_title_artist.setdefault(key, []).append(item)
         by_title.setdefault(normalize_text(title), []).append(item)
+        by_loose_title_artist.setdefault((loose_title, norm_artist), []).append(item)
+        by_loose_title.setdefault(loose_title, []).append(item)
+        plex_meta.append({"title": title, "artist": artist})
 
     used_rating_keys: set[str] = set()
     selected: list[Any] = []
     missing: list[dict[str, str]] = []
+    match_breakdown = {
+        "exact_title_artist": 0,
+        "exact_title_only": 0,
+        "loose_title_artist": 0,
+        "loose_title_only": 0,
+    }
+
+    def pick_unused(bucket: list[Any]) -> Any | None:
+        for cand in bucket:
+            if cand.ratingKey not in used_rating_keys:
+                return cand
+        return None
 
     for track in imported_tracks:
         t_title = track.get("title", "")
         t_artist = track.get("artist", "")
-        exact_bucket = by_title_artist.get(normalize_key(t_title, t_artist), [])
+        t_norm_title = normalize_text(t_title)
+        t_norm_artist = normalize_text(t_artist)
+        t_loose_title = normalize_title_loose(t_title)
 
-        picked = None
-        for cand in exact_bucket:
-            if cand.ratingKey not in used_rating_keys:
-                picked = cand
-                break
+        picked = pick_unused(by_title_artist.get((t_norm_title, t_norm_artist), []))
+        if picked:
+            match_breakdown["exact_title_artist"] += 1
 
         if not picked:
-            title_bucket = by_title.get(normalize_text(t_title), [])
-            for cand in title_bucket:
-                if cand.ratingKey not in used_rating_keys:
-                    picked = cand
-                    break
+            picked = pick_unused(by_title.get(t_norm_title, []))
+            if picked:
+                match_breakdown["exact_title_only"] += 1
+
+        if not picked:
+            picked = pick_unused(by_loose_title_artist.get((t_loose_title, t_norm_artist), []))
+            if picked:
+                match_breakdown["loose_title_artist"] += 1
+
+        if not picked:
+            picked = pick_unused(by_loose_title.get(t_loose_title, []))
+            if picked:
+                match_breakdown["loose_title_only"] += 1
 
         if picked:
             used_rating_keys.add(picked.ratingKey)
@@ -206,6 +244,8 @@ def build_reorder_plan(playlist: Any, imported_tracks: list[dict[str, str]]) -> 
             for item in desired
         ],
         "current_count": len(plex_items),
+        "match_breakdown": match_breakdown,
+        "plex_sample": plex_meta[:30],
     }
 
 
@@ -366,6 +406,8 @@ def preview() -> Any:
             "currentCount": plan["current_count"],
             "missingTotal": len(plan["missing_in_plex"]),
             "missingInPlex": plan["missing_in_plex"][:50],
+            "plexSample": plan["plex_sample"],
+            "matchBreakdown": plan["match_breakdown"],
             "newOrderPreview": plan["new_order_titles"][:30],
             "planFile": str(tmp_path),
         })
