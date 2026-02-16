@@ -26,12 +26,13 @@ PORT=8080
 ```
 
 Se lasci `PLEX_TOKEN` vuoto, fai login dalla UI.
+La porta esterna e configurabile con `HOST_PORT` (default `8090`).
 
 ## Avvio locale
 ```bash
 docker compose up --build -d
 ```
-Poi apri: `http://localhost:8080`
+Poi apri: `http://localhost:8090`
 
 ## Deploy con Portainer (Repository mode)
 1. In `Create stack`, scegli `Repository` e usa il repo GitHub.
@@ -39,9 +40,10 @@ Poi apri: `http://localhost:8080`
 3. Nella sezione Environment imposta almeno:
    - `PLEX_BASEURL=http://IP_DEL_TUO_PLEX:32400`
    - `PLEX_TOKEN` (opzionale, puoi usare OAuth da UI)
+   - `HOST_PORT` (es. `8090`, `8091`, ...)
    - opzionali: `MAX_UPLOAD_MB`, `PORT`
 4. Deploy dello stack.
-5. Apri `http://IP_DEL_SERVER:8080`.
+5. Apri `http://IP_DEL_SERVER:HOST_PORT`.
 
 Nota: il compose non usa piu `env_file: .env`, quindi in Repository mode non avrai errore `env file ... not found`.
 
