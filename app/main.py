@@ -160,6 +160,13 @@ def build_reorder_plan(playlist: Any, imported_tracks: list[dict[str, str]]) -> 
             "new_order_ids": [],
             "new_order_titles": [],
             "current_count": 0,
+            "match_breakdown": {
+                "exact_title_artist": 0,
+                "exact_title_only": 0,
+                "loose_title_artist": 0,
+                "loose_title_only": 0,
+            },
+            "plex_sample": [],
         }
 
     by_title_artist: dict[tuple[str, str], list[Any]] = {}
