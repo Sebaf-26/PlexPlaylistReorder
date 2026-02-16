@@ -151,8 +151,32 @@ def plex_client(token_override: str | None = None) -> PlexServer:
     return PlexServer(baseurl=baseurl, token=token)
 
 
+def resolve_playlist_items(plex: PlexServer, playlist: Any) -> list[Any]:
+    # Normal path.
+    items = playlist.items() or []
+    if items:
+        return items
+
+    # Some servers/users expose leafCount but return empty items until reload.
+    try:
+        playlist.reload()
+        items = playlist.items() or []
+    except Exception:
+        items = []
+    if items:
+        return items
+
+    # Last fallback: direct query using playlist items key.
+    try:
+        items_key = getattr(playlist, "itemsKey", "") or f"{playlist.key}/items"
+        return plex.fetchItems(items_key) or []
+    except Exception:
+        return []
+
+
 def build_reorder_plan(playlist: Any, imported_tracks: list[dict[str, str]]) -> dict[str, Any]:
-    plex_items = playlist.items()
+    plex_items = resolve_playlist_items(playlist._server, playlist)
+    leaf_count = int(getattr(playlist, "leafCount", 0) or 0)
     if not plex_items:
         return {
             "matches": 0,
@@ -160,6 +184,7 @@ def build_reorder_plan(playlist: Any, imported_tracks: list[dict[str, str]]) -> 
             "new_order_ids": [],
             "new_order_titles": [],
             "current_count": 0,
+            "leaf_count": leaf_count,
             "match_breakdown": {
                 "exact_title_artist": 0,
                 "exact_title_only": 0,
@@ -251,6 +276,7 @@ def build_reorder_plan(playlist: Any, imported_tracks: list[dict[str, str]]) -> 
             for item in desired
         ],
         "current_count": len(plex_items),
+        "leaf_count": leaf_count,
         "match_breakdown": match_breakdown,
         "plex_sample": plex_meta[:30],
     }
@@ -411,6 +437,7 @@ def preview() -> Any:
             "matches": plan["matches"],
             "uploadedCount": len(UPLOAD_CACHE[upload_id]),
             "currentCount": plan["current_count"],
+            "leafCount": plan["leaf_count"],
             "missingTotal": len(plan["missing_in_plex"]),
             "missingInPlex": plan["missing_in_plex"][:50],
             "importedSample": UPLOAD_CACHE[upload_id][:30],

@@ -19,7 +19,7 @@
 
     <section class="card">
       <h2>1) Upload Apple Music File</h2>
-      <input type="file" id="fileInput" accept=".txt,.csv">
+      <input type="file" id="fileInput" accept=".txt,.csv" autocomplete="off">
       <button id="uploadBtn">Upload</button>
       <div id="uploadInfo" class="small"></div>
     </section>
@@ -76,6 +76,15 @@
       if (isJson) headers['Content-Type'] = 'application/json';
       if (plexToken) headers['X-Plex-Token'] = plexToken;
       return headers;
+    }
+
+    function resetPageState() {
+      uploadId = null;
+      el.fileInput.value = '';
+      el.confirmCheck.checked = false;
+      el.uploadInfo.textContent = '';
+      el.previewInfo.textContent = '';
+      el.result.textContent = '';
     }
 
     async function readJsonResponse(res) {
@@ -239,6 +248,7 @@
           <div><strong>Playlist:</strong> ${data.playlistTitle}</div>
           <div><strong>Matches:</strong> ${data.matches} / ${data.uploadedCount ?? 0}</div>
           <div><strong>Missing in Plex:</strong> ${data.missingTotal ?? 0}</div>
+          <div><strong>Plex items loaded:</strong> ${data.currentCount ?? 0} / ${data.leafCount ?? 0} reported by Plex</div>
           <div><strong>Imported file sample (first 10):</strong></div>
           <ol>${importedRows}</ol>
           <div><strong>Current Plex playlist sample (first 10):</strong></div>
@@ -293,6 +303,11 @@
       if (event.data && event.data.type === 'plex-auth-complete') {
         renderOk(el.plexAuthInfo, 'Plex authorization received. Verifying login...');
       }
+    });
+
+    // Avoid sticky form state when browser restores page from cache.
+    window.addEventListener('pageshow', () => {
+      resetPageState();
     });
 
     loadPlaylists();
