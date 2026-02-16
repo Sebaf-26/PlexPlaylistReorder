@@ -227,8 +227,8 @@
 
         el.previewInfo.innerHTML = `
           <div><strong>Playlist:</strong> ${data.playlistTitle}</div>
-          <div><strong>Matches:</strong> ${data.matches} / ${data.currentCount}</div>
-          <div><strong>Missing in Plex:</strong> ${(data.missingInPlex || []).length}</div>
+          <div><strong>Matches:</strong> ${data.matches} / ${data.uploadedCount ?? 0}</div>
+          <div><strong>Missing in Plex:</strong> ${data.missingTotal ?? 0}</div>
           <div><strong>New order preview (first 10):</strong></div>
           <ol>${previewRows}</ol>
         `;

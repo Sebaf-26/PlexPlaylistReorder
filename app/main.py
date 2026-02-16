@@ -362,7 +362,9 @@ def preview() -> Any:
         return jsonify({
             "playlistTitle": playlist.title,
             "matches": plan["matches"],
+            "uploadedCount": len(UPLOAD_CACHE[upload_id]),
             "currentCount": plan["current_count"],
+            "missingTotal": len(plan["missing_in_plex"]),
             "missingInPlex": plan["missing_in_plex"][:50],
             "newOrderPreview": plan["new_order_titles"][:30],
             "planFile": str(tmp_path),
