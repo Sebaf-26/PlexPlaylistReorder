@@ -48,6 +48,7 @@
   <script>
     let uploadId = null;
     let plexToken = null;
+    let plexLoginPolling = false;
 
     const el = {
       plexLoginBtn: document.getElementById('plexLoginBtn'),
@@ -80,6 +81,8 @@
     }
 
     async function pollPlexLogin(sessionId) {
+      if (plexLoginPolling) return;
+      plexLoginPolling = true;
       const maxTries = 120;
       for (let i = 0; i < maxTries; i++) {
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -87,15 +90,18 @@
         const data = await res.json();
         if (!res.ok) {
           renderError(el.plexAuthInfo, data.error || 'Errore verifica login Plex.');
+          plexLoginPolling = false;
           return;
         }
         if (data.loggedIn) {
           plexToken = data.plexToken;
           renderOk(el.plexAuthInfo, 'Login Plex completato. Token OAuth attivo per questa sessione.');
+          plexLoginPolling = false;
           return;
         }
       }
       renderError(el.plexAuthInfo, 'Timeout login Plex. Riprova.');
+      plexLoginPolling = false;
     }
 
     el.plexLoginBtn.addEventListener('click', async () => {
@@ -104,7 +110,7 @@
         const res = await fetch('/api/auth/plex/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ forwardUrl: window.location.origin + '/' })
+          body: JSON.stringify({ forwardUrl: window.location.origin + '/auth/plex/callback' })
         });
         const data = await res.json();
         if (!res.ok) {
@@ -112,8 +118,12 @@
           return;
         }
 
-        window.open(data.authUrl, '_blank', 'noopener,noreferrer');
-        renderOk(el.plexAuthInfo, 'Completa il login nella nuova scheda Plex. Attendo conferma...');
+        const popup = window.open(data.authUrl, 'plex-oauth-login', 'width=520,height=760');
+        if (!popup) {
+          renderError(el.plexAuthInfo, 'Popup bloccato dal browser. Abilita i popup e riprova.');
+          return;
+        }
+        renderOk(el.plexAuthInfo, 'Completa il login nel popup Plex. Si chiudera automaticamente.');
         await pollPlexLogin(data.sessionId);
       } catch (e) {
         renderError(el.plexAuthInfo, String(e));

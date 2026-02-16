@@ -27,6 +27,7 @@ PORT=8080
 
 Se lasci `PLEX_TOKEN` vuoto, fai login dalla UI.
 La porta esterna e configurabile con `HOST_PORT` (default `8090`).
+Durante il login OAuth si apre un popup dedicato Plex che poi si chiude automaticamente.
 
 ## Avvio locale
 ```bash
@@ -49,6 +50,7 @@ Nota: il compose non usa piu `env_file: .env`, quindi in Repository mode non avr
 
 ## Formati Apple Music supportati
 - Export tabellare con colonne `Name` e `Artist` (TXT/CSV, UTF-16 o UTF-8).
+- Export iTunes/Apple Music in italiano con colonne `Nome` e `Artista`.
 - Fallback righe singole tipo `Artist - Title`.
 
 ## Limiti attuali

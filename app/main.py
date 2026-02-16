@@ -63,23 +63,34 @@ def parse_apple_playlist_text(raw_text: str) -> list[dict[str, str]]:
     if not lines:
         return []
 
-    sample = "\n".join(lines[:5])
-    dialect = csv.Sniffer().sniff(sample, delimiters="\t,;") if len(lines) > 1 else csv.excel_tab
+    # Apple Music / iTunes export uses tab-separated values in most locales.
+    # Detect tabs first to avoid incorrect delimiter sniffing on date fields.
+    first_line = lines[0]
+    if "\t" in first_line:
+        delimiter = "\t"
+    elif ";" in first_line:
+        delimiter = ";"
+    else:
+        delimiter = ","
 
-    reader = csv.DictReader(io.StringIO(raw_text), dialect=dialect)
+    reader = csv.DictReader(io.StringIO(raw_text), delimiter=delimiter)
     if not reader.fieldnames:
         return []
 
-    lower_fields = {name.lower().strip(): name for name in reader.fieldnames}
+    normalized_fields = {
+        normalize_text((name or "").replace("\ufeff", "").strip()): name
+        for name in reader.fieldnames
+    }
 
     def field(*candidates: str) -> str | None:
         for c in candidates:
-            if c in lower_fields:
-                return lower_fields[c]
+            norm = normalize_text(c)
+            if norm in normalized_fields:
+                return normalized_fields[norm]
         return None
 
-    title_field = field("name", "title", "track name")
-    artist_field = field("artist", "artist name")
+    title_field = field("name", "title", "track name", "nome", "titolo")
+    artist_field = field("artist", "artist name", "artista")
 
     if not title_field:
         return []
@@ -209,6 +220,11 @@ def health() -> Any:
 @app.route("/", methods=["GET"])
 def index() -> Any:
     return render_template("index.html")
+
+
+@app.route("/auth/plex/callback", methods=["GET"])
+def plex_auth_callback() -> Any:
+    return render_template("auth_callback.html")
 
 
 @app.route("/api/auth/plex/start", methods=["POST"])
