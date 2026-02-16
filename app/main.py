@@ -212,6 +212,20 @@ def build_reorder_plan(playlist: Any, imported_tracks: list[dict[str, str]]) -> 
     }
 
 
+@app.errorhandler(413)
+def payload_too_large(_: Exception) -> Any:
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "File troppo grande per l'upload"}), 413
+    return "Payload Too Large", 413
+
+
+@app.errorhandler(Exception)
+def unhandled_api_error(exc: Exception) -> Any:
+    if request.path.startswith("/api/"):
+        return jsonify({"error": str(exc)}), 500
+    return "Internal Server Error", 500
+
+
 @app.route("/health", methods=["GET"])
 def health() -> Any:
     return jsonify({"ok": True})
@@ -302,7 +316,10 @@ def upload() -> Any:
 
     raw = file.read()
     text = decode_uploaded_bytes(raw)
-    parsed = parse_apple_playlist_text(text)
+    try:
+        parsed = parse_apple_playlist_text(text)
+    except Exception as exc:
+        return jsonify({"error": f"Errore parsing file Apple Music: {exc}"}), 400
 
     if not parsed:
         return jsonify({
