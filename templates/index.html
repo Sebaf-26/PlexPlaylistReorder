@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plex Playlist Reorder</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="wrap">
+    <h1>Plex Playlist Reorder</h1>
+    <p class="muted">Carica un export Apple Music (TXT/CSV), seleziona la playlist Plex e conferma il riordino.</p>
+
+    <section class="card">
+      <h2>1) Carica file Apple Music</h2>
+      <input type="file" id="fileInput" accept=".txt,.csv">
+      <button id="uploadBtn">Carica</button>
+      <div id="uploadInfo" class="small"></div>
+    </section>
+
+    <section class="card">
+      <h2>2) Seleziona playlist Plex</h2>
+      <button id="loadPlaylistsBtn">Carica playlist Plex</button>
+      <select id="playlistSelect">
+        <option value="">Seleziona...</option>
+      </select>
+      <button id="previewBtn">Verifica ordine</button>
+    </section>
+
+    <section class="card">
+      <h2>3) Conferma</h2>
+      <div id="previewInfo" class="small"></div>
+      <label class="check">
+        <input type="checkbox" id="confirmCheck">
+        Sicuro? Applica riordino ora
+      </label>
+      <button id="applyBtn" class="danger">Applica riordino</button>
+      <div id="result" class="small"></div>
+    </section>
+  </main>
+
+  <script>
+    let uploadId = null;
+
+    const el = {
+      fileInput: document.getElementById('fileInput'),
+      uploadBtn: document.getElementById('uploadBtn'),
+      uploadInfo: document.getElementById('uploadInfo'),
+      loadPlaylistsBtn: document.getElementById('loadPlaylistsBtn'),
+      playlistSelect: document.getElementById('playlistSelect'),
+      previewBtn: document.getElementById('previewBtn'),
+      previewInfo: document.getElementById('previewInfo'),
+      confirmCheck: document.getElementById('confirmCheck'),
+      applyBtn: document.getElementById('applyBtn'),
+      result: document.getElementById('result'),
+    };
+
+    function renderError(container, msg) {
+      container.innerHTML = `<span class="err">${msg}</span>`;
+    }
+
+    function renderOk(container, msg) {
+      container.innerHTML = `<span class="ok">${msg}</span>`;
+    }
+
+    el.uploadBtn.addEventListener('click', async () => {
+      el.uploadInfo.textContent = '';
+      const file = el.fileInput.files[0];
+      if (!file) {
+        renderError(el.uploadInfo, 'Seleziona un file prima di caricare.');
+        return;
+      }
+
+      const form = new FormData();
+      form.append('file', file);
+
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: form });
+        const data = await res.json();
+        if (!res.ok) {
+          renderError(el.uploadInfo, data.error || 'Errore upload');
+          return;
+        }
+        uploadId = data.uploadId;
+        renderOk(el.uploadInfo, `Upload ok: ${data.tracks} tracce lette.`);
+      } catch (e) {
+        renderError(el.uploadInfo, String(e));
+      }
+    });
+
+    el.loadPlaylistsBtn.addEventListener('click', async () => {
+      el.playlistSelect.innerHTML = '<option value="">Caricamento...</option>';
+      try {
+        const res = await fetch('/api/playlists');
+        const data = await res.json();
+        if (!res.ok) {
+          el.playlistSelect.innerHTML = '<option value="">Errore</option>';
+          renderError(el.previewInfo, data.error || 'Errore caricamento playlist');
+          return;
+        }
+
+        el.playlistSelect.innerHTML = '<option value="">Seleziona...</option>';
+        for (const p of data.playlists) {
+          const o = document.createElement('option');
+          o.value = p.id;
+          o.textContent = `${p.title} (${p.count})`;
+          el.playlistSelect.appendChild(o);
+        }
+      } catch (e) {
+        el.playlistSelect.innerHTML = '<option value="">Errore</option>';
+        renderError(el.previewInfo, String(e));
+      }
+    });
+
+    el.previewBtn.addEventListener('click', async () => {
+      el.previewInfo.textContent = '';
+      const playlistId = el.playlistSelect.value;
+      if (!uploadId) {
+        renderError(el.previewInfo, 'Prima carica il file Apple Music.');
+        return;
+      }
+      if (!playlistId) {
+        renderError(el.previewInfo, 'Seleziona una playlist Plex.');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uploadId, playlistId })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          renderError(el.previewInfo, data.error || 'Errore verifica');
+          return;
+        }
+
+        const previewRows = (data.newOrderPreview || []).slice(0, 10)
+          .map(t => `<li>${t.artist ? `${t.artist} - ` : ''}${t.title}</li>`)
+          .join('');
+
+        el.previewInfo.innerHTML = `
+          <div><strong>Playlist:</strong> ${data.playlistTitle}</div>
+          <div><strong>Match:</strong> ${data.matches} / ${data.currentCount}</div>
+          <div><strong>Mancanti in Plex:</strong> ${(data.missingInPlex || []).length}</div>
+          <div><strong>Anteprima nuovo ordine (prime 10):</strong></div>
+          <ol>${previewRows}</ol>
+        `;
+      } catch (e) {
+        renderError(el.previewInfo, String(e));
+      }
+    });
+
+    el.applyBtn.addEventListener('click', async () => {
+      el.result.textContent = '';
+      const playlistId = el.playlistSelect.value;
+      if (!uploadId || !playlistId) {
+        renderError(el.result, 'Manca upload o playlist selezionata.');
+        return;
+      }
+      if (!el.confirmCheck.checked) {
+        renderError(el.result, 'Conferma "Sicuro?" prima di applicare.');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/reorder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uploadId, playlistId, confirm: true })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          renderError(el.result, data.error || 'Errore riordino');
+          return;
+        }
+        renderOk(el.result, `Riordino completato: ${data.playlistTitle}. Tracce ordinate: ${data.ordered}, match: ${data.matches}, mancanti: ${data.missing}`);
+      } catch (e) {
+        renderError(el.result, String(e));
+      }
+    });
+  </script>
+</body>
+</html>

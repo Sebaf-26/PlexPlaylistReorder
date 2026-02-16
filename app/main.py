@@ -1,0 +1,327 @@
+import csv
+import io
+import os
+import re
+import tempfile
+import unicodedata
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from dotenv import load_dotenv
+from flask import Flask, jsonify, render_template, request
+from plexapi.exceptions import NotFound
+from plexapi.server import PlexServer
+
+load_dotenv()
+
+app = Flask(__name__, template_folder="../templates", static_folder="../static")
+
+max_upload_mb = int(os.getenv("MAX_UPLOAD_MB", "8"))
+app.config["MAX_CONTENT_LENGTH"] = max_upload_mb * 1024 * 1024
+
+UPLOAD_CACHE: dict[str, list[dict[str, str]]] = {}
+
+
+@dataclass
+class TrackRef:
+    title: str
+    artist: str
+
+
+def normalize_text(value: str) -> str:
+    if not value:
+        return ""
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    value = value.lower().strip()
+    value = re.sub(r"\s+", " ", value)
+    return value
+
+
+def normalize_key(title: str, artist: str) -> tuple[str, str]:
+    return normalize_text(title), normalize_text(artist)
+
+
+def decode_uploaded_bytes(raw: bytes) -> str:
+    encodings = ["utf-16", "utf-8-sig", "utf-8", "latin-1"]
+    for enc in encodings:
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def parse_apple_playlist_text(raw_text: str) -> list[dict[str, str]]:
+    lines = [line for line in raw_text.splitlines() if line.strip()]
+    if not lines:
+        return []
+
+    sample = "\n".join(lines[:5])
+    dialect = csv.Sniffer().sniff(sample, delimiters="\t,;") if len(lines) > 1 else csv.excel_tab
+
+    reader = csv.DictReader(io.StringIO(raw_text), dialect=dialect)
+    if not reader.fieldnames:
+        return []
+
+    lower_fields = {name.lower().strip(): name for name in reader.fieldnames}
+
+    def field(*candidates: str) -> str | None:
+        for c in candidates:
+            if c in lower_fields:
+                return lower_fields[c]
+        return None
+
+    title_field = field("name", "title", "track name")
+    artist_field = field("artist", "artist name")
+
+    if not title_field:
+        return []
+
+    parsed: list[dict[str, str]] = []
+    for row in reader:
+        title = (row.get(title_field) or "").strip()
+        artist = (row.get(artist_field) or "").strip() if artist_field else ""
+        if title:
+            parsed.append({"title": title, "artist": artist})
+
+    # Fallback: plain text one-track-per-line if CSV parse gave nothing.
+    if not parsed:
+        for line in lines:
+            clean = line.strip()
+            if not clean:
+                continue
+            if " - " in clean:
+                artist, title = clean.split(" - ", 1)
+                parsed.append({"title": title.strip(), "artist": artist.strip()})
+            else:
+                parsed.append({"title": clean, "artist": ""})
+
+    return parsed
+
+
+def plex_client() -> PlexServer:
+    baseurl = os.getenv("PLEX_BASEURL", "").strip()
+    token = os.getenv("PLEX_TOKEN", "").strip()
+
+    if not baseurl or not token:
+        raise RuntimeError("PLEX_BASEURL o PLEX_TOKEN mancanti nelle variabili ambiente")
+
+    return PlexServer(baseurl=baseurl, token=token)
+
+
+def build_reorder_plan(playlist: Any, imported_tracks: list[dict[str, str]]) -> dict[str, Any]:
+    plex_items = playlist.items()
+    if not plex_items:
+        return {
+            "matches": 0,
+            "missing_in_plex": imported_tracks,
+            "new_order_ids": [],
+            "new_order_titles": [],
+            "current_count": 0,
+        }
+
+    by_title_artist: dict[tuple[str, str], list[Any]] = {}
+    by_title: dict[str, list[Any]] = {}
+
+    for item in plex_items:
+        title = getattr(item, "title", "") or ""
+        artist = getattr(item, "grandparentTitle", "") or getattr(item, "originalTitle", "") or ""
+
+        key = normalize_key(title, artist)
+        by_title_artist.setdefault(key, []).append(item)
+        by_title.setdefault(normalize_text(title), []).append(item)
+
+    used_rating_keys: set[str] = set()
+    selected: list[Any] = []
+    missing: list[dict[str, str]] = []
+
+    for track in imported_tracks:
+        t_title = track.get("title", "")
+        t_artist = track.get("artist", "")
+        exact_bucket = by_title_artist.get(normalize_key(t_title, t_artist), [])
+
+        picked = None
+        for cand in exact_bucket:
+            if cand.ratingKey not in used_rating_keys:
+                picked = cand
+                break
+
+        if not picked:
+            title_bucket = by_title.get(normalize_text(t_title), [])
+            for cand in title_bucket:
+                if cand.ratingKey not in used_rating_keys:
+                    picked = cand
+                    break
+
+        if picked:
+            used_rating_keys.add(picked.ratingKey)
+            selected.append(picked)
+        else:
+            missing.append(track)
+
+    trailing = [item for item in plex_items if item.ratingKey not in used_rating_keys]
+    desired = selected + trailing
+
+    return {
+        "matches": len(selected),
+        "missing_in_plex": missing,
+        "new_order_ids": [item.playlistItemID for item in desired],
+        "new_order_titles": [
+            {
+                "title": getattr(item, "title", ""),
+                "artist": getattr(item, "grandparentTitle", "") or getattr(item, "originalTitle", "") or "",
+            }
+            for item in desired
+        ],
+        "current_count": len(plex_items),
+    }
+
+
+@app.route("/health", methods=["GET"])
+def health() -> Any:
+    return jsonify({"ok": True})
+
+
+@app.route("/", methods=["GET"])
+def index() -> Any:
+    return render_template("index.html")
+
+
+@app.route("/api/playlists", methods=["GET"])
+def playlists() -> Any:
+    try:
+        plex = plex_client()
+        items = []
+        for p in plex.playlists():
+            if getattr(p, "smart", False):
+                continue
+            if getattr(p, "playlistType", "") != "audio":
+                continue
+            items.append({"id": p.ratingKey, "title": p.title, "count": p.leafCount})
+        items.sort(key=lambda x: x["title"].lower())
+        return jsonify({"playlists": items})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/upload", methods=["POST"])
+def upload() -> Any:
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "File mancante"}), 400
+
+    raw = file.read()
+    text = decode_uploaded_bytes(raw)
+    parsed = parse_apple_playlist_text(text)
+
+    if not parsed:
+        return jsonify({
+            "error": "Formato non riconosciuto. Usa export Apple Music (TXT/CSV) con colonne Name/Artist o righe 'Artist - Title'."
+        }), 400
+
+    upload_id = str(uuid.uuid4())
+    UPLOAD_CACHE[upload_id] = parsed
+
+    return jsonify({
+        "uploadId": upload_id,
+        "tracks": len(parsed),
+        "sample": parsed[:10],
+    })
+
+
+@app.route("/api/preview", methods=["POST"])
+def preview() -> Any:
+    payload = request.get_json(silent=True) or {}
+    upload_id = (payload.get("uploadId") or "").strip()
+    playlist_id = str(payload.get("playlistId") or "").strip()
+
+    if not upload_id or upload_id not in UPLOAD_CACHE:
+        return jsonify({"error": "Upload non trovato o scaduto"}), 400
+
+    if not playlist_id:
+        return jsonify({"error": "playlistId mancante"}), 400
+
+    try:
+        plex = plex_client()
+        playlist = plex.fetchItem(int(playlist_id))
+
+        if getattr(playlist, "smart", False):
+            return jsonify({"error": "La playlist Plex selezionata e smart e non ordinabile manualmente"}), 400
+
+        plan = build_reorder_plan(playlist, UPLOAD_CACHE[upload_id])
+        tmp_path = Path(tempfile.gettempdir()) / f"plex_reorder_{upload_id}.plan"
+        tmp_path.write_text(
+            "\n".join(str(pid) for pid in plan["new_order_ids"]),
+            encoding="utf-8",
+        )
+
+        return jsonify({
+            "playlistTitle": playlist.title,
+            "matches": plan["matches"],
+            "currentCount": plan["current_count"],
+            "missingInPlex": plan["missing_in_plex"][:50],
+            "newOrderPreview": plan["new_order_titles"][:30],
+            "planFile": str(tmp_path),
+        })
+    except NotFound:
+        return jsonify({"error": "Playlist non trovata"}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/reorder", methods=["POST"])
+def reorder() -> Any:
+    payload = request.get_json(silent=True) or {}
+    upload_id = (payload.get("uploadId") or "").strip()
+    playlist_id = str(payload.get("playlistId") or "").strip()
+    confirm = bool(payload.get("confirm"))
+
+    if not confirm:
+        return jsonify({"error": "Conferma richiesta"}), 400
+
+    if not upload_id or upload_id not in UPLOAD_CACHE:
+        return jsonify({"error": "Upload non trovato o scaduto"}), 400
+
+    if not playlist_id:
+        return jsonify({"error": "playlistId mancante"}), 400
+
+    try:
+        plex = plex_client()
+        playlist = plex.fetchItem(int(playlist_id))
+
+        if getattr(playlist, "smart", False):
+            return jsonify({"error": "La playlist Plex selezionata e smart e non ordinabile manualmente"}), 400
+
+        plan = build_reorder_plan(playlist, UPLOAD_CACHE[upload_id])
+        ordered_ids = plan["new_order_ids"]
+
+        playlist_items = {item.playlistItemID: item for item in playlist.items()}
+        previous = None
+
+        for item_id in ordered_ids:
+            item = playlist_items.get(item_id)
+            if not item:
+                continue
+            if previous is None:
+                playlist.moveItem(item)
+            else:
+                playlist.moveItem(item, after=previous)
+            previous = item
+
+        return jsonify({
+            "ok": True,
+            "playlistTitle": playlist.title,
+            "ordered": len(ordered_ids),
+            "matches": plan["matches"],
+            "missing": len(plan["missing_in_plex"]),
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "8080"))
+    app.run(host="0.0.0.0", port=port)
