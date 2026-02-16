@@ -406,6 +406,7 @@ def preview() -> Any:
             "currentCount": plan["current_count"],
             "missingTotal": len(plan["missing_in_plex"]),
             "missingInPlex": plan["missing_in_plex"][:50],
+            "importedSample": UPLOAD_CACHE[upload_id][:30],
             "plexSample": plan["plex_sample"],
             "matchBreakdown": plan["match_breakdown"],
             "newOrderPreview": plan["new_order_titles"][:30],
