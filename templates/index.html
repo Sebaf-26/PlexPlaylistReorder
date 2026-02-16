@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,37 +9,37 @@
 <body>
   <main class="wrap">
     <h1>Plex Playlist Reorder</h1>
-    <p class="muted">Carica un export Apple Music (TXT/CSV), seleziona la playlist Plex e conferma il riordino.</p>
+    <p class="muted">Upload an Apple Music export (TXT/CSV), select a Plex playlist, and confirm reordering.</p>
 
     <section class="card">
-      <h2>0) Accesso Plex</h2>
-      <button id="plexLoginBtn">Accedi con Plex</button>
+      <h2>0) Plex Login</h2>
+      <button id="plexLoginBtn">Sign in with Plex</button>
       <div id="plexAuthInfo" class="small"></div>
     </section>
 
     <section class="card">
-      <h2>1) Carica file Apple Music</h2>
+      <h2>1) Upload Apple Music File</h2>
       <input type="file" id="fileInput" accept=".txt,.csv">
-      <button id="uploadBtn">Carica</button>
+      <button id="uploadBtn">Upload</button>
       <div id="uploadInfo" class="small"></div>
     </section>
 
     <section class="card">
-      <h2>2) Seleziona playlist Plex</h2>
+      <h2>2) Select Plex Playlist</h2>
       <select id="playlistSelect">
-        <option value="">Accedi con Plex per caricare le playlist...</option>
+        <option value="">Sign in with Plex to load playlists...</option>
       </select>
-      <button id="previewBtn">Verifica ordine</button>
+      <button id="previewBtn">Preview Order</button>
     </section>
 
     <section class="card">
-      <h2>3) Conferma</h2>
+      <h2>3) Confirm</h2>
       <div id="previewInfo" class="small"></div>
       <label class="check">
         <input type="checkbox" id="confirmCheck">
-        Sicuro? Applica riordino ora
+        Are you sure? Apply reorder now
       </label>
-      <button id="applyBtn" class="danger">Applica riordino</button>
+      <button id="applyBtn" class="danger">Apply Reorder</button>
       <div id="result" class="small"></div>
     </section>
   </main>
@@ -89,23 +89,23 @@
     }
 
     async function loadPlaylists() {
-      el.playlistSelect.innerHTML = '<option value="">Caricamento playlist...</option>';
+      el.playlistSelect.innerHTML = '<option value="">Loading playlists...</option>';
       try {
         const res = await fetch('/api/playlists', { headers: authHeaders(false) });
         const data = await readJsonResponse(res);
         if (!res.ok) {
-          const errMsg = String(data.error || 'Errore caricamento playlist');
+          const errMsg = String(data.error || 'Failed to load playlists');
           const lower = errMsg.toLowerCase();
-          if (lower.includes('token plex') || lower.includes('login oauth')) {
-            el.playlistSelect.innerHTML = '<option value="">Accedi con Plex per caricare le playlist...</option>';
+          if (lower.includes('oauth token') || lower.includes('missing plexbaseurl')) {
+            el.playlistSelect.innerHTML = '<option value="">Sign in with Plex to load playlists...</option>';
             return;
           }
-          el.playlistSelect.innerHTML = '<option value="">Errore</option>';
+          el.playlistSelect.innerHTML = '<option value="">Error</option>';
           renderError(el.previewInfo, errMsg);
           return;
         }
 
-        el.playlistSelect.innerHTML = '<option value="">Seleziona...</option>';
+        el.playlistSelect.innerHTML = '<option value="">Select...</option>';
         for (const p of data.playlists || []) {
           const o = document.createElement('option');
           o.value = p.id;
@@ -113,10 +113,10 @@
           el.playlistSelect.appendChild(o);
         }
         if ((data.playlists || []).length === 0) {
-          el.playlistSelect.innerHTML = '<option value="">Nessuna playlist audio trovata</option>';
+          el.playlistSelect.innerHTML = '<option value="">No audio playlists found</option>';
         }
       } catch (e) {
-        el.playlistSelect.innerHTML = '<option value="">Errore</option>';
+        el.playlistSelect.innerHTML = '<option value="">Error</option>';
         renderError(el.previewInfo, String(e));
       }
     }
@@ -130,25 +130,25 @@
         const res = await fetch(`/api/auth/plex/status?sessionId=${encodeURIComponent(sessionId)}`);
         const data = await readJsonResponse(res);
         if (!res.ok) {
-          renderError(el.plexAuthInfo, data.error || 'Errore verifica login Plex.');
+          renderError(el.plexAuthInfo, data.error || 'Failed to verify Plex login.');
           plexLoginPolling = false;
           return;
         }
         if (data.loggedIn) {
           plexToken = data.plexToken;
-          renderOk(el.plexAuthInfo, 'Login Plex completato. Token OAuth attivo per questa sessione.');
+          renderOk(el.plexAuthInfo, 'Plex login completed. OAuth token active for this browser session.');
           await loadPlaylists();
           plexLoginPolling = false;
           return;
         }
       }
-      renderError(el.plexAuthInfo, 'Timeout login Plex. Riprova.');
+      renderError(el.plexAuthInfo, 'Plex login timed out. Please try again.');
       plexLoginPolling = false;
     }
 
     el.plexLoginBtn.addEventListener('click', async () => {
       try {
-        el.plexAuthInfo.textContent = 'Apro login Plex...';
+        el.plexAuthInfo.textContent = 'Opening Plex login...';
         const res = await fetch('/api/auth/plex/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -156,16 +156,16 @@
         });
         const data = await readJsonResponse(res);
         if (!res.ok) {
-          renderError(el.plexAuthInfo, data.error || 'Errore avvio OAuth Plex.');
+          renderError(el.plexAuthInfo, data.error || 'Failed to start Plex OAuth.');
           return;
         }
 
         const popup = window.open(data.authUrl, 'plex-oauth-login', 'width=520,height=760');
         if (!popup) {
-          renderError(el.plexAuthInfo, 'Popup bloccato dal browser. Abilita i popup e riprova.');
+          renderError(el.plexAuthInfo, 'Popup blocked by browser. Enable popups and try again.');
           return;
         }
-        renderOk(el.plexAuthInfo, 'Completa il login nel popup Plex. Si chiudera automaticamente.');
+        renderOk(el.plexAuthInfo, 'Complete login in the Plex popup. It will close automatically.');
         await pollPlexLogin(data.sessionId);
       } catch (e) {
         renderError(el.plexAuthInfo, String(e));
@@ -176,7 +176,7 @@
       el.uploadInfo.textContent = '';
       const file = el.fileInput.files[0];
       if (!file) {
-        renderError(el.uploadInfo, 'Seleziona un file prima di caricare.');
+        renderError(el.uploadInfo, 'Please select a file before uploading.');
         return;
       }
 
@@ -187,11 +187,11 @@
         const res = await fetch('/api/upload', { method: 'POST', body: form });
         const data = await readJsonResponse(res);
         if (!res.ok) {
-          renderError(el.uploadInfo, data.error || 'Errore upload');
+          renderError(el.uploadInfo, data.error || 'Upload failed');
           return;
         }
         uploadId = data.uploadId;
-        renderOk(el.uploadInfo, `Upload ok: ${data.tracks} tracce lette.`);
+        renderOk(el.uploadInfo, `Upload complete: ${data.tracks} tracks parsed.`);
       } catch (e) {
         renderError(el.uploadInfo, String(e));
       }
@@ -201,11 +201,11 @@
       el.previewInfo.textContent = '';
       const playlistId = el.playlistSelect.value;
       if (!uploadId) {
-        renderError(el.previewInfo, 'Prima carica il file Apple Music.');
+        renderError(el.previewInfo, 'Upload your Apple Music file first.');
         return;
       }
       if (!playlistId) {
-        renderError(el.previewInfo, 'Seleziona una playlist Plex.');
+        renderError(el.previewInfo, 'Please select a Plex playlist.');
         return;
       }
 
@@ -217,7 +217,7 @@
         });
         const data = await readJsonResponse(res);
         if (!res.ok) {
-          renderError(el.previewInfo, data.error || 'Errore verifica');
+          renderError(el.previewInfo, data.error || 'Preview failed');
           return;
         }
 
@@ -227,9 +227,9 @@
 
         el.previewInfo.innerHTML = `
           <div><strong>Playlist:</strong> ${data.playlistTitle}</div>
-          <div><strong>Match:</strong> ${data.matches} / ${data.currentCount}</div>
-          <div><strong>Mancanti in Plex:</strong> ${(data.missingInPlex || []).length}</div>
-          <div><strong>Anteprima nuovo ordine (prime 10):</strong></div>
+          <div><strong>Matches:</strong> ${data.matches} / ${data.currentCount}</div>
+          <div><strong>Missing in Plex:</strong> ${(data.missingInPlex || []).length}</div>
+          <div><strong>New order preview (first 10):</strong></div>
           <ol>${previewRows}</ol>
         `;
       } catch (e) {
@@ -241,11 +241,11 @@
       el.result.textContent = '';
       const playlistId = el.playlistSelect.value;
       if (!uploadId || !playlistId) {
-        renderError(el.result, 'Manca upload o playlist selezionata.');
+        renderError(el.result, 'Missing upload or selected playlist.');
         return;
       }
       if (!el.confirmCheck.checked) {
-        renderError(el.result, 'Conferma "Sicuro?" prima di applicare.');
+        renderError(el.result, 'Please check confirmation before applying.');
         return;
       }
 
@@ -257,10 +257,10 @@
         });
         const data = await readJsonResponse(res);
         if (!res.ok) {
-          renderError(el.result, data.error || 'Errore riordino');
+          renderError(el.result, data.error || 'Reorder failed');
           return;
         }
-        renderOk(el.result, `Riordino completato: ${data.playlistTitle}. Tracce ordinate: ${data.ordered}, match: ${data.matches}, mancanti: ${data.missing}`);
+        renderOk(el.result, `Reorder completed: ${data.playlistTitle}. Ordered tracks: ${data.ordered}, matches: ${data.matches}, missing: ${data.missing}`);
       } catch (e) {
         renderError(el.result, String(e));
       }
@@ -269,7 +269,7 @@
     window.addEventListener('message', async (event) => {
       if (event.origin !== window.location.origin) return;
       if (event.data && event.data.type === 'plex-auth-complete') {
-        renderOk(el.plexAuthInfo, 'Autorizzazione Plex ricevuta. Verifico login...');
+        renderOk(el.plexAuthInfo, 'Plex authorization received. Verifying login...');
       }
     });
 

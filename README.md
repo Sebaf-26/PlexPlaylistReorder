@@ -1,59 +1,54 @@
 # Plex Playlist Reorder (Apple Music -> Plex)
 
-Web app containerizzabile per Portainer che:
-- carica un file playlist Apple Music (TXT/CSV in Unicode),
-- supporta login Plex via OAuth (PIN flow) oppure token da `.env`,
-- mostra le playlist audio Plex non-smart,
-- fa anteprima dei match,
-- chiede conferma `Sicuro?`,
-- riordina la playlist Plex via API `move`.
+Dockerized web app for Portainer that:
+- uploads an Apple Music export file (TXT/CSV, Unicode),
+- signs in to Plex via OAuth (PIN flow),
+- lists non-smart Plex audio playlists,
+- previews track matching,
+- asks for explicit confirmation,
+- reorders a Plex playlist through the Plex move API.
 
-## Requisiti
-- Plex Media Server raggiungibile dalla rete del container.
-- `PLEX_BASEURL` corretto.
-- Uno tra:
-  - `PLEX_TOKEN` in `.env`, oppure
-  - login via pulsante `Accedi con Plex` nella UI.
+## Requirements
+- Plex Media Server reachable from the container network.
+- `PLEX_BASEURL` configured correctly.
+- Plex OAuth login through the UI.
 
-## Configurazione `.env`
-Copia `.env.example` in `.env` e compila:
+## Environment
+Copy `.env.example` to `.env` and configure:
 
 ```env
-PLEX_BASEURL=http://IP_DEL_TUO_PLEX:32400
-PLEX_TOKEN=
+PLEX_BASEURL=http://YOUR_PLEX_IP:32400
 MAX_UPLOAD_MB=8
+HOST_PORT=8090
 PORT=8080
 ```
 
-Se lasci `PLEX_TOKEN` vuoto, fai login dalla UI.
-La porta esterna e configurabile con `HOST_PORT` (default `8090`).
-Durante il login OAuth si apre un popup dedicato Plex che poi si chiude automaticamente.
+Notes:
+- `HOST_PORT` is the host-side port exposed by Docker.
+- `PORT` is the internal container port.
 
-## Avvio locale
+## Run locally
 ```bash
 docker compose up --build -d
 ```
-Poi apri: `http://localhost:8090`
+Then open: `http://localhost:8090`
 
-## Deploy con Portainer (Repository mode)
-1. In `Create stack`, scegli `Repository` e usa il repo GitHub.
-2. Seleziona `docker-compose.yml` come compose path.
-3. Nella sezione Environment imposta almeno:
-   - `PLEX_BASEURL=http://IP_DEL_TUO_PLEX:32400`
-   - `PLEX_TOKEN` (opzionale, puoi usare OAuth da UI)
-   - `HOST_PORT` (es. `8090`, `8091`, ...)
-   - opzionali: `MAX_UPLOAD_MB`, `PORT`
-4. Deploy dello stack.
-5. Apri `http://IP_DEL_SERVER:HOST_PORT`.
+## Deploy with Portainer (Repository mode)
+1. Create a new stack and choose `Repository`.
+2. Select `docker-compose.yml` as compose path.
+3. In Environment, set at least:
+   - `PLEX_BASEURL=http://YOUR_PLEX_IP:32400`
+   - `HOST_PORT` (for example `8090`, `8091`, ...)
+   - optional: `MAX_UPLOAD_MB`, `PORT`
+4. Deploy the stack.
+5. Open `http://YOUR_SERVER_IP:HOST_PORT`.
 
-Nota: il compose non usa piu `env_file: .env`, quindi in Repository mode non avrai errore `env file ... not found`.
+## Apple Music formats supported
+- Tabular export with `Name` + `Artist` columns (TXT/CSV, UTF-16 or UTF-8).
+- iTunes/Apple Music Italian export with `Nome` + `Artista` columns.
+- Fallback plain lines in `Artist - Title` format.
 
-## Formati Apple Music supportati
-- Export tabellare con colonne `Name` e `Artist` (TXT/CSV, UTF-16 o UTF-8).
-- Export iTunes/Apple Music in italiano con colonne `Nome` e `Artista`.
-- Fallback righe singole tipo `Artist - Title`.
-
-## Limiti attuali
-- Le smart playlist Plex non sono ordinabili manualmente (vengono escluse).
-- Matching basato su `Title + Artist` (con fallback su solo titolo).
-- Il token OAuth ottenuto da UI resta in memoria solo per la sessione browser corrente.
+## Current limitations
+- Plex smart playlists are not manually reorderable.
+- Matching uses `Title + Artist` first, then title-only fallback.
+- OAuth token is kept in memory for the current browser session only.

@@ -73,7 +73,7 @@ def parse_apple_playlist_text(raw_text: str) -> list[dict[str, str]]:
     else:
         delimiter = ","
 
-    reader = csv.DictReader(io.StringIO(raw_text), delimiter=delimiter)
+    reader = csv.DictReader(io.StringIO(raw_text, newline=""), delimiter=delimiter)
     if not reader.fieldnames:
         return []
 
@@ -128,18 +128,15 @@ def cleanup_oauth_sessions() -> None:
 
 
 def resolve_request_token() -> str:
-    header_token = (request.headers.get("X-Plex-Token") or "").strip()
-    if header_token:
-        return header_token
-    return (os.getenv("PLEX_TOKEN", "") or "").strip()
+    return (request.headers.get("X-Plex-Token") or "").strip()
 
 
 def plex_client(token_override: str | None = None) -> PlexServer:
     baseurl = os.getenv("PLEX_BASEURL", "").strip()
-    token = (token_override or "").strip() or (os.getenv("PLEX_TOKEN", "") or "").strip()
+    token = (token_override or "").strip()
 
     if not baseurl or not token:
-        raise RuntimeError("PLEX_BASEURL o token Plex mancanti (env o login OAuth)")
+        raise RuntimeError("Missing PLEX_BASEURL or Plex OAuth token")
 
     return PlexServer(baseurl=baseurl, token=token)
 
@@ -215,7 +212,7 @@ def build_reorder_plan(playlist: Any, imported_tracks: list[dict[str, str]]) -> 
 @app.errorhandler(413)
 def payload_too_large(_: Exception) -> Any:
     if request.path.startswith("/api/"):
-        return jsonify({"error": "File troppo grande per l'upload"}), 413
+        return jsonify({"error": "Uploaded file is too large"}), 413
     return "Payload Too Large", 413
 
 
@@ -276,7 +273,7 @@ def plex_auth_status() -> Any:
     cleanup_oauth_sessions()
     session_id = (request.args.get("sessionId") or "").strip()
     if not session_id or session_id not in OAUTH_CACHE:
-        return jsonify({"error": "Sessione OAuth non trovata o scaduta"}), 400
+        return jsonify({"error": "OAuth session not found or expired"}), 400
 
     info = OAUTH_CACHE[session_id]
     pinlogin: MyPlexPinLogin = info["pinlogin"]
@@ -312,18 +309,18 @@ def playlists() -> Any:
 def upload() -> Any:
     file = request.files.get("file")
     if not file or not file.filename:
-        return jsonify({"error": "File mancante"}), 400
+        return jsonify({"error": "Missing file"}), 400
 
     raw = file.read()
     text = decode_uploaded_bytes(raw)
     try:
         parsed = parse_apple_playlist_text(text)
     except Exception as exc:
-        return jsonify({"error": f"Errore parsing file Apple Music: {exc}"}), 400
+        return jsonify({"error": f"Apple Music file parsing error: {exc}"}), 400
 
     if not parsed:
         return jsonify({
-            "error": "Formato non riconosciuto. Usa export Apple Music (TXT/CSV) con colonne Name/Artist o righe 'Artist - Title'."
+            "error": "Unsupported format. Use Apple Music export (TXT/CSV) with Name/Artist columns or 'Artist - Title' rows."
         }), 400
 
     upload_id = str(uuid.uuid4())
@@ -343,17 +340,17 @@ def preview() -> Any:
     playlist_id = str(payload.get("playlistId") or "").strip()
 
     if not upload_id or upload_id not in UPLOAD_CACHE:
-        return jsonify({"error": "Upload non trovato o scaduto"}), 400
+        return jsonify({"error": "Upload not found or expired"}), 400
 
     if not playlist_id:
-        return jsonify({"error": "playlistId mancante"}), 400
+        return jsonify({"error": "Missing playlistId"}), 400
 
     try:
         plex = plex_client(token_override=resolve_request_token())
         playlist = plex.fetchItem(int(playlist_id))
 
         if getattr(playlist, "smart", False):
-            return jsonify({"error": "La playlist Plex selezionata e smart e non ordinabile manualmente"}), 400
+            return jsonify({"error": "Selected Plex playlist is smart and cannot be manually reordered"}), 400
 
         plan = build_reorder_plan(playlist, UPLOAD_CACHE[upload_id])
         tmp_path = Path(tempfile.gettempdir()) / f"plex_reorder_{upload_id}.plan"
@@ -371,7 +368,7 @@ def preview() -> Any:
             "planFile": str(tmp_path),
         })
     except NotFound:
-        return jsonify({"error": "Playlist non trovata"}), 404
+        return jsonify({"error": "Playlist not found"}), 404
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -384,20 +381,20 @@ def reorder() -> Any:
     confirm = bool(payload.get("confirm"))
 
     if not confirm:
-        return jsonify({"error": "Conferma richiesta"}), 400
+        return jsonify({"error": "Confirmation required"}), 400
 
     if not upload_id or upload_id not in UPLOAD_CACHE:
-        return jsonify({"error": "Upload non trovato o scaduto"}), 400
+        return jsonify({"error": "Upload not found or expired"}), 400
 
     if not playlist_id:
-        return jsonify({"error": "playlistId mancante"}), 400
+        return jsonify({"error": "Missing playlistId"}), 400
 
     try:
         plex = plex_client(token_override=resolve_request_token())
         playlist = plex.fetchItem(int(playlist_id))
 
         if getattr(playlist, "smart", False):
-            return jsonify({"error": "La playlist Plex selezionata e smart e non ordinabile manualmente"}), 400
+            return jsonify({"error": "Selected Plex playlist is smart and cannot be manually reordered"}), 400
 
         plan = build_reorder_plan(playlist, UPLOAD_CACHE[upload_id])
         ordered_ids = plan["new_order_ids"]
