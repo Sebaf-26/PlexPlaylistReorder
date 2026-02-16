@@ -3,6 +3,7 @@ import io
 import os
 import re
 import tempfile
+import time
 import unicodedata
 import uuid
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from typing import Any
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 from plexapi.exceptions import NotFound
+from plexapi.myplex import MyPlexPinLogin
 from plexapi.server import PlexServer
 
 load_dotenv()
@@ -22,6 +24,8 @@ max_upload_mb = int(os.getenv("MAX_UPLOAD_MB", "8"))
 app.config["MAX_CONTENT_LENGTH"] = max_upload_mb * 1024 * 1024
 
 UPLOAD_CACHE: dict[str, list[dict[str, str]]] = {}
+OAUTH_CACHE: dict[str, dict[str, Any]] = {}
+OAUTH_SESSION_TTL_SEC = 10 * 60
 
 
 @dataclass
@@ -102,12 +106,29 @@ def parse_apple_playlist_text(raw_text: str) -> list[dict[str, str]]:
     return parsed
 
 
-def plex_client() -> PlexServer:
+def cleanup_oauth_sessions() -> None:
+    now = time.time()
+    expired = []
+    for session_id, info in OAUTH_CACHE.items():
+        if now - info["created_at"] > OAUTH_SESSION_TTL_SEC:
+            expired.append(session_id)
+    for session_id in expired:
+        OAUTH_CACHE.pop(session_id, None)
+
+
+def resolve_request_token() -> str:
+    header_token = (request.headers.get("X-Plex-Token") or "").strip()
+    if header_token:
+        return header_token
+    return (os.getenv("PLEX_TOKEN", "") or "").strip()
+
+
+def plex_client(token_override: str | None = None) -> PlexServer:
     baseurl = os.getenv("PLEX_BASEURL", "").strip()
-    token = os.getenv("PLEX_TOKEN", "").strip()
+    token = (token_override or "").strip() or (os.getenv("PLEX_TOKEN", "") or "").strip()
 
     if not baseurl or not token:
-        raise RuntimeError("PLEX_BASEURL o PLEX_TOKEN mancanti nelle variabili ambiente")
+        raise RuntimeError("PLEX_BASEURL o token Plex mancanti (env o login OAuth)")
 
     return PlexServer(baseurl=baseurl, token=token)
 
@@ -190,10 +211,60 @@ def index() -> Any:
     return render_template("index.html")
 
 
+@app.route("/api/auth/plex/start", methods=["POST"])
+def plex_auth_start() -> Any:
+    try:
+        cleanup_oauth_sessions()
+        payload = request.get_json(silent=True) or {}
+        forward_url = (payload.get("forwardUrl") or "").strip() or None
+
+        session_id = str(uuid.uuid4())
+        headers = {
+            "X-Plex-Product": "Plex Playlist Reorder",
+            "X-Plex-Device-Name": "Plex Playlist Reorder Web",
+            "X-Plex-Client-Identifier": session_id,
+        }
+        pinlogin = MyPlexPinLogin(headers=headers, oauth=True)
+        auth_url = pinlogin.oauthUrl(forwardUrl=forward_url) if forward_url else pinlogin.oauthUrl()
+
+        OAUTH_CACHE[session_id] = {
+            "created_at": time.time(),
+            "pinlogin": pinlogin,
+        }
+
+        return jsonify({
+            "sessionId": session_id,
+            "authUrl": auth_url,
+            "expiresInSec": OAUTH_SESSION_TTL_SEC,
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/auth/plex/status", methods=["GET"])
+def plex_auth_status() -> Any:
+    cleanup_oauth_sessions()
+    session_id = (request.args.get("sessionId") or "").strip()
+    if not session_id or session_id not in OAUTH_CACHE:
+        return jsonify({"error": "Sessione OAuth non trovata o scaduta"}), 400
+
+    info = OAUTH_CACHE[session_id]
+    pinlogin: MyPlexPinLogin = info["pinlogin"]
+
+    try:
+        if pinlogin.checkLogin():
+            token = (pinlogin.token or "").strip()
+            OAUTH_CACHE.pop(session_id, None)
+            return jsonify({"loggedIn": True, "plexToken": token})
+        return jsonify({"loggedIn": False})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.route("/api/playlists", methods=["GET"])
 def playlists() -> Any:
     try:
-        plex = plex_client()
+        plex = plex_client(token_override=resolve_request_token())
         items = []
         for p in plex.playlists():
             if getattr(p, "smart", False):
@@ -245,7 +316,7 @@ def preview() -> Any:
         return jsonify({"error": "playlistId mancante"}), 400
 
     try:
-        plex = plex_client()
+        plex = plex_client(token_override=resolve_request_token())
         playlist = plex.fetchItem(int(playlist_id))
 
         if getattr(playlist, "smart", False):
@@ -289,7 +360,7 @@ def reorder() -> Any:
         return jsonify({"error": "playlistId mancante"}), 400
 
     try:
-        plex = plex_client()
+        plex = plex_client(token_override=resolve_request_token())
         playlist = plex.fetchItem(int(playlist_id))
 
         if getattr(playlist, "smart", False):

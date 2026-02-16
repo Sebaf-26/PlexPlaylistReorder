@@ -2,6 +2,7 @@
 
 Web app containerizzabile per Portainer che:
 - carica un file playlist Apple Music (TXT/CSV in Unicode),
+- supporta login Plex via OAuth (PIN flow) oppure token da `.env`,
 - mostra le playlist audio Plex non-smart,
 - fa anteprima dei match,
 - chiede conferma `Sicuro?`,
@@ -9,17 +10,22 @@ Web app containerizzabile per Portainer che:
 
 ## Requisiti
 - Plex Media Server raggiungibile dalla rete del container.
-- Token Plex valido.
+- `PLEX_BASEURL` corretto.
+- Uno tra:
+  - `PLEX_TOKEN` in `.env`, oppure
+  - login via pulsante `Accedi con Plex` nella UI.
 
 ## Configurazione `.env`
 Copia `.env.example` in `.env` e compila:
 
 ```env
 PLEX_BASEURL=http://IP_DEL_TUO_PLEX:32400
-PLEX_TOKEN=IL_TUO_TOKEN
+PLEX_TOKEN=
 MAX_UPLOAD_MB=8
 PORT=8080
 ```
+
+Se lasci `PLEX_TOKEN` vuoto, fai login dalla UI.
 
 ## Avvio locale
 ```bash
@@ -40,7 +46,4 @@ Poi apri: `http://localhost:8080`
 ## Limiti attuali
 - Le smart playlist Plex non sono ordinabili manualmente (vengono escluse).
 - Matching basato su `Title + Artist` (con fallback su solo titolo).
-
-## Nota su login Plex
-In questa versione usi `PLEX_TOKEN` in `.env` (piu semplice e robusto in container).
-Si puo aggiungere in seguito login Plex OAuth/PIN flow nella UI.
+- Il token OAuth ottenuto da UI resta in memoria solo per la sessione browser corrente.

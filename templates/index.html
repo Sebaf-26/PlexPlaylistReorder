@@ -12,6 +12,12 @@
     <p class="muted">Carica un export Apple Music (TXT/CSV), seleziona la playlist Plex e conferma il riordino.</p>
 
     <section class="card">
+      <h2>0) Accesso Plex</h2>
+      <button id="plexLoginBtn">Accedi con Plex</button>
+      <div id="plexAuthInfo" class="small"></div>
+    </section>
+
+    <section class="card">
       <h2>1) Carica file Apple Music</h2>
       <input type="file" id="fileInput" accept=".txt,.csv">
       <button id="uploadBtn">Carica</button>
@@ -41,8 +47,11 @@
 
   <script>
     let uploadId = null;
+    let plexToken = null;
 
     const el = {
+      plexLoginBtn: document.getElementById('plexLoginBtn'),
+      plexAuthInfo: document.getElementById('plexAuthInfo'),
       fileInput: document.getElementById('fileInput'),
       uploadBtn: document.getElementById('uploadBtn'),
       uploadInfo: document.getElementById('uploadInfo'),
@@ -62,6 +71,54 @@
     function renderOk(container, msg) {
       container.innerHTML = `<span class="ok">${msg}</span>`;
     }
+
+    function authHeaders(isJson = false) {
+      const headers = {};
+      if (isJson) headers['Content-Type'] = 'application/json';
+      if (plexToken) headers['X-Plex-Token'] = plexToken;
+      return headers;
+    }
+
+    async function pollPlexLogin(sessionId) {
+      const maxTries = 120;
+      for (let i = 0; i < maxTries; i++) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const res = await fetch(`/api/auth/plex/status?sessionId=${encodeURIComponent(sessionId)}`);
+        const data = await res.json();
+        if (!res.ok) {
+          renderError(el.plexAuthInfo, data.error || 'Errore verifica login Plex.');
+          return;
+        }
+        if (data.loggedIn) {
+          plexToken = data.plexToken;
+          renderOk(el.plexAuthInfo, 'Login Plex completato. Token OAuth attivo per questa sessione.');
+          return;
+        }
+      }
+      renderError(el.plexAuthInfo, 'Timeout login Plex. Riprova.');
+    }
+
+    el.plexLoginBtn.addEventListener('click', async () => {
+      try {
+        el.plexAuthInfo.textContent = 'Apro login Plex...';
+        const res = await fetch('/api/auth/plex/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ forwardUrl: window.location.origin + '/' })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          renderError(el.plexAuthInfo, data.error || 'Errore avvio OAuth Plex.');
+          return;
+        }
+
+        window.open(data.authUrl, '_blank', 'noopener,noreferrer');
+        renderOk(el.plexAuthInfo, 'Completa il login nella nuova scheda Plex. Attendo conferma...');
+        await pollPlexLogin(data.sessionId);
+      } catch (e) {
+        renderError(el.plexAuthInfo, String(e));
+      }
+    });
 
     el.uploadBtn.addEventListener('click', async () => {
       el.uploadInfo.textContent = '';
@@ -91,7 +148,9 @@
     el.loadPlaylistsBtn.addEventListener('click', async () => {
       el.playlistSelect.innerHTML = '<option value="">Caricamento...</option>';
       try {
-        const res = await fetch('/api/playlists');
+        const res = await fetch('/api/playlists', {
+          headers: authHeaders(false)
+        });
         const data = await res.json();
         if (!res.ok) {
           el.playlistSelect.innerHTML = '<option value="">Errore</option>';
@@ -127,7 +186,7 @@
       try {
         const res = await fetch('/api/preview', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders(true),
           body: JSON.stringify({ uploadId, playlistId })
         });
         const data = await res.json();
@@ -167,7 +226,7 @@
       try {
         const res = await fetch('/api/reorder', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders(true),
           body: JSON.stringify({ uploadId, playlistId, confirm: true })
         });
         const data = await res.json();
